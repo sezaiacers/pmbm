@@ -426,28 +426,39 @@ class PMPMUpdater(object):
                     except:
                         ind = 0
                     new_hyps[a, t] = ind
-            new_state.hyps.extend(new_hyps.tolist())
+            new_state.hyps.append(new_hyps)
 
-        # apply softmax
+
+        new_state.hyps = np.concatenate(new_state.hyps, 0)
+
         hyp_weights = np.array(new_state.hyp_weights, dtype=np.float32)
         hyp_weight_exp = np.exp(hyp_weights - np.max(hyp_weights))
         hyp_weights = hyp_weight_exp / np.sum(hyp_weight_exp)
-        new_state.hyp_weights = hyp_weights.tolist()
+        new_state.hyp_weights = hyp_weights
 
         return new_state
 
 
-q_x = 10
-q_y = 10
-transition_model = CombinedTransitionModel(
-    ConstantVelocity(q_x),
-    ConstantVelocity(q_y),
-)
+class PMPMPruner(object):
+    def __init__(self, poisson_pruning_threshold, hyp_pruning_threshold, max_hyp):
+        self._poisson_pruning_threshold = poisson_pruning_threshold
+        self._hyp_pruning_threshold = hyp_pruning_threshold
+        self._max_hyp = max_hyp
 
-measurement_model = MeasurementModel(
-    ndim=4,
-    mapping=(0, 2),
-    covar=np.array([[100, 0], [0, 100]]),
-)
+    def __call__(self, state):
+        new_state = State()
 
-# [-inf, 0.4, 0.5, -inf, 0.4; -inf, -inf, -inf, -inf, -inf; 10., 11.0, 12.0, -inf, 40]
+        new_state.untracks = list(
+            filter(
+                lambda untrack: untrack.weight < self.
+                _poisson_pruning_threshold,
+                state.undetected_states,
+            ))
+
+        mask = state.hyp_weights > self._hyp_pruning_threshold
+        hyp_weights = state.hyp_weights[mask]
+        hyps = stats.hyps[mask]
+
+        sort_inds = np.argsort(hyp_weights)[::-1]
+        hyp_weights = hyp_weights[sort_inds][:self._max_hyp]
+        hyps = hyps[sort_inds][:self._max_hyp]

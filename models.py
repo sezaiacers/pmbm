@@ -330,7 +330,8 @@ class PMPMUpdater(object):
 
             for t in range(num_prev_tracks):
                 hyp_ind = hyp[t]
-                if hyp_ind is None: continue
+                if hyp_ind is None:
+                    raise ValueError()
 
                 num_prev_hyps = len(state.tracks[t].hyps)
 
@@ -345,7 +346,93 @@ class PMPMUpdater(object):
 
             for t in range(num_prev_tracks, num_prev_tracks + num_new_tracks):
                 measurement_hyp = new_state.tracks[t].hyps[0]
-                cost_assign[t, measurement_hyp.assoc_hist[0]] = measurement_hyp.weight
+                cost_assign[
+                    t, measurement_hyp.assoc_hist[0]] = measurement_hyp.weight
+
+            cost_assign = np.array(x, dtype=np.float32).reshape(-1, 5)
+            cost_assign_not_inf = (~np.isinf(cost_assign)).astype(np.int32)
+            indices_stay_column, = np.where(np.sum(cost_assign_not_inf, 0) > 1)
+            indices_stay_row, = np.where(
+                np.sum(cost_assign_not_inf[:, indices_stay_column], 1) > 0)
+            fixed_indices_stay_column, = np.where(
+                np.sum(cost_assign_not_inf, 0) == 1)
+            fixed_indices_stay_row, fixed_indices_stay_column_2 = np.where(
+                cost_assign_not_inf[:, fixed_indices_stay_column])
+            fixed_indices_stay_row_2 = np.arange(
+                fixed_indices_stay_column_2.max() + 1)
+            fixed_indices_stay_row_2[
+                fixed_indices_stay_column_2] = fixed_indices_stay_row
+            fixed_indices_stay_row = fixed_indices_stay_row_2
+            fixed_cost = cost_assign[fixed_indices_stay_row,
+                                     fixed_indices_stay_column].sum()
+            cost_assgn_trimmed = cost_assign[
+                indices_stay_row][:, indices_stay_column]
+
+            default_cost = cost_not_assign.sum() + fixed_cost + log(hyp_weight)
+
+            if cost_assgn_trimmed.size == 0:
+                assoc_indices = np.full(
+                    shape=(1, num_new_tracks),
+                    fill_value=-1,
+                    dtype=np.int32,
+                )
+                assoc_indices[
+                    fixed_indices_stay_column] = fixed_indices_stay_row
+                new_state.hyp_weights.append(default_cost)
+            else:
+                trimmed_assoc_indices = 0.0
+                assoc_costs = []
+
+                assoc_indices = np.full(
+                    shape=(2, 4),
+                    fill_value=-1,
+                    dtype=np.int32,
+                )
+
+                for i, trimmed_assoc_indice in enumerate(
+                        trimmed_assoc_indices):
+                    assoc_indices[i, indices_stay_column] = indices_stay_row[
+                        trimmed_assoc_indice]
+                    assoc_indices[
+                        i, fixed_indices_stay_column] = fixed_indices_stay_row
+
+                for assoc_cost in assoc_costs:
+                    new_state.hyp_weights.append(default_cost - assoc_cost)
+
+            new_hyps = np.full(
+                shape=(len(assoc_indices), num_prev_tracks + num_new_tracks),
+                fill_value=-1,
+                dtype=np.int32,
+            )
+            for t in range(num_prev_tracks):
+                hyp_ind = hyp[t]
+                if hyp_ind is None:
+                    raise ValueError()
+                num_prev_hyps = len(state.tracks[t].hyps)
+                for a, assoc_indice in enumerate(assoc_indices):
+                    try:
+                        ind = assoc_indice.index(t)
+                        ind = hyp_ind + num_prev_hyps * ind
+                    except:
+                        ind = hyp_ind
+
+                    new_hyps[a, t] = ind
+
+            for t in range(num_prev_tracks, num_prev_tracks + num_new_tracks):
+                for a, assoc_indice in enumerate(assoc_indices):
+                    try:
+                        assoc_indice.index(t)
+                        ind = -1
+                    except:
+                        ind = 0
+                    new_hyps[a, t] = ind
+            new_state.hyps.extend(new_hyps.tolist())
+
+        # apply softmax
+        hyp_weights = np.array(new_state.hyp_weights, dtype=np.float32)
+        hyp_weight_exp = np.exp(hyp_weights - np.max(hyp_weights))
+        hyp_weights = hyp_weight_exp / np.sum(hyp_weight_exp)
+        new_state.hyp_weights = hyp_weights.tolist()
 
         return new_state
 
@@ -362,3 +449,5 @@ measurement_model = MeasurementModel(
     mapping=(0, 2),
     covar=np.array([[100, 0], [0, 100]]),
 )
+
+# [-inf, 0.4, 0.5, -inf, 0.4; -inf, -inf, -inf, -inf, -inf; 10., 11.0, 12.0, -inf, 40]

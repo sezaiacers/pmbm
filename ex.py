@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from copy import deepcopy
 from scipy.stats import multivariate_normal
 
-import operator
+import itertools
 
 import numpy as np
 import math
@@ -83,13 +83,6 @@ class PMBMPredictor(object):
         return State(hyps, ppps)
 
 
-class HypEntry(NamedTuple):
-    prob: float
-    gauss: Gaussian
-    start_time: int
-    hist: Sequence[int]
-
-
 class PMBMUpdater(object):
     def __init__(
         self,
@@ -108,9 +101,20 @@ class PMBMUpdater(object):
         self._R = R
 
     def __call__(self, state, zs, current_time):
-        return self._zs_to_hyps(state.ppps, zs, current_time)
+        ppps = self._update_ppps(state.ppps)
 
-    def _hyp_to_hyps(self, hyp, zs):
+        ppp_hyp_entries = self._zs_to_hyp_entries(state.ppps, zs, current_time)
+        hyps = list(
+            itertools.chain(*[
+                self._hyp_to_hyps(hyp, ppp_hyp_entries, zs)
+                for hyp in state.hyps
+            ]))
+        return State(hyps=hyps, ppps=ppps)
+
+    def _hyp_to_hyps(self, hyp, ppp_hyp_entries, zs):
+        pass
+
+    def _hyp_entry_to_hyp_entries(self, hyp, zs):
         Nz, Nx = np.shape(self._H)
 
         prob, (mu, covar), start_time, hist = hyp
@@ -165,12 +169,13 @@ class PMBMUpdater(object):
                 hyps.append((float('-inf'), None))
         return misdetection_hyp, hyps
 
-    def _zs_to_hyps(self, ppps, zs, current_time):
+    def _zs_to_hyp_entries(self, ppps, zs, current_time):
         return [
-            self._z_to_hyp(i, z, ppps, current_time) for i, z in enumerate(zs)
+            self._z_to_hyp_entry(i, z, ppps, current_time)
+            for i, z in enumerate(zs)
         ]
 
-    def _z_to_hyp(self, i, z, ppps, current_time):
+    def _z_to_hyp_entry(self, i, z, ppps, current_time):
         Nz, Nx = np.shape(self._H)
         states = []
         for weight, (mu, covar) in ppps:
@@ -238,6 +243,17 @@ class PMBMUpdater(object):
                 ),
             )
 
+    def _update_ppps(self, ppps):
+        return [
+            PPP(
+                weight=weight * self._misdetection_probability,
+                gauss=Gaussian(
+                    mu=mu,
+                    covar=covar,
+                ),
+            ) for weight, (mu, covar) in ppps
+        ]
+
 
 time_interval = timedelta(seconds=1)
 transition_model = CombinedTransitionModel(
@@ -297,9 +313,6 @@ u = PMBMUpdater(
 )
 
 s = u(state, zs, 0)
-h = s[0][1]
-
-a = u._hyp_to_hyps(h, zs)
 '''
 from sklearn import datasets
 from scipy.stats import multivariate_normal
@@ -323,7 +336,6 @@ def pdf(x, mean, S):
     distance = float(x_minus_mean.T @ S_inv @ x_minus_mean)
     return -0.5 * (distance + S_log_det + Nz * math.log(math.pi * 2))
 '''
-
 '''
 # z = [1.76405235;0.40015721;0.97873798;2.2408932]
 # s = [ 1.00665013, -1.41434036, -0.4953264 , -0.43520063;-1.41434036,  3.81637179,  0.58656485,  0.5053143;-0.4953264 ,  0.58656485,  0.87865608,  0.00746661;-0.43520063,  0.5053143 ,  0.00746661,  0.79932913]

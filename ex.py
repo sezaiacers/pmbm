@@ -112,7 +112,31 @@ class PMBMUpdater(object):
         return State(hyps=hyps, ppps=ppps)
 
     def _hyp_to_hyps(self, hyp, ppp_hyp_entries, zs):
-        pass
+        num_prev_tracks = len(hyp.entries)
+        num_new_tracks = len(ppp_hyp_entries)
+
+        cost = np.full(
+            shape=(num_prev_tracks + num_new_tracks, num_new_tracks),
+            fill_value=np.finfo('f').max,
+            dtype=np.float32,
+        )
+        misdetection_cost = np.zeros(num_prev_tracks, dtype=np.float32)
+
+        entry_to_entries = [None] * num_prev_tracks
+        for i, entry in enumerate(hyp.entries):
+            misdetection_entry, detection_entries = self._hyp_entry_to_hyp_entries(
+                entry, zs)
+            entry_to_entries[i] = (misdetection_entry, detection_entries)
+
+            for j, detection_entry in enumerate(detection_entries):
+                if detection_entry[1] is not None:
+                    cost[i, j] = detection_entry[0] - misdetection_entry[0]
+            misdetection_cost[i] = misdetection_entry[0]
+
+        for i, entry in enumerate(ppp_hyp_entries):
+            cost[i + num_prev_tracks, i] = entry[0]
+
+        return []
 
     def _hyp_entry_to_hyp_entries(self, hyp, zs):
         Nz, Nx = np.shape(self._H)
@@ -302,7 +326,22 @@ p = PMBMPredictor(
     ppps,
 )
 
-state = p(State(), time_interval)
+s = State(hyps=[
+    Hyp(1.0,
+        entries=[
+            HypEntry(
+                prob=0.7,
+                gauss=Gaussian(
+                    mu=np.array([[10], [1], [20], [2]], dtype=np.float32),
+                    covar=np.diag([10, 3, 4, 20]),
+                ),
+                start_time=0,
+                hist=[1, 3],
+            )
+        ])
+], )
+
+s = p(s, time_interval)
 
 u = PMBMUpdater(
     0.9,
@@ -312,7 +351,7 @@ u = PMBMUpdater(
     measurement_model.R(),
 )
 
-s = u(state, zs, 0)
+s = u(s, zs, 0)
 '''
 from sklearn import datasets
 from scipy.stats import multivariate_normal

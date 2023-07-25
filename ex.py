@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from copy import deepcopy
 from scipy.stats import multivariate_normal
 
+import operator
+
 import numpy as np
 import math
 
@@ -81,6 +83,13 @@ class PMBMPredictor(object):
         return State(hyps, ppps)
 
 
+class HypEntry(NamedTuple):
+    prob: float
+    gauss: Gaussian
+    start_time: int
+    hist: Sequence[int]
+
+
 class PMBMUpdater(object):
     def __init__(
         self,
@@ -91,6 +100,7 @@ class PMBMUpdater(object):
         R,
     ):
         self._detection_probability = detection_probability
+        self._misdetection_probability = 1. - self._detection_probability
         self._gating_threshold = gating_threshold
         self._clutter_intensity = clutter_intensity
 
@@ -100,9 +110,60 @@ class PMBMUpdater(object):
     def __call__(self, state, zs, current_time):
         return self._zs_to_hyps(state.ppps, zs, current_time)
 
-    def _hyp_to_hyp(self, hyp, zs):
+    def _hyp_to_hyps(self, hyp, zs):
+        Nz, Nx = np.shape(self._H)
+
+        prob, (mu, covar), start_time, hist = hyp
+
+        misdetection_hyp = (
+            math.log(1. - prob + prob * self._misdetection_probability),
+            HypEntry(
+                prob=prob * self._misdetection_probability /
+                (1. - prob + prob * self._misdetection_probability),
+                gauss=Gaussian(
+                    mu=mu,
+                    covar=covar,
+                ),
+                start_time=start_time,
+                hist=hist + [0],
+            ),
+        )
+
+        S = self._H @ covar @ self._H.T  # NzXNz
+        z_pred = self._H @ mu  #Nzx1
+
+        V = np.linalg.cholesky(S)  # NzXNz
+        S_inv_sqrt = np.linalg.inv(V)  # NzXNz
+        S_inv = S_inv_sqrt.T @ S_inv_sqrt  # NzXNz
+        S_log_det = 2 * np.log(np.prod(np.diag(V)))  # float
+
+        K = covar @ self._H.T @ S_inv  #NxXNz
+
+        hyps = []
         for i, z in enumerate(zs):
-            pass
+            z_minus_z_pred = z - z_pred  # NzX1
+            distance = float(z_minus_z_pred.T @ S_inv @ z_minus_z_pred)
+            if distance < self._gating_threshold:
+                P = (np.eye(Nx) - K @ self._H) @ covar  #NxXNx
+                P = (P + P.T) / 2  # NxXNx
+                x = mu + K @ z_minus_z_pred  #NxX1
+
+                hyps.append((
+                    math.log(prob * self._detection_probability) - 0.5 *
+                    (distance + S_log_det + Nz * math.log(math.pi * 2)),
+                    HypEntry(
+                        prob=1.,
+                        gauss=Gaussian(
+                            mu=x,
+                            covar=P,
+                        ),
+                        start_time=start_time,
+                        hist=hist + [i],
+                    ),
+                ))
+            else:
+                hyps.append((float('-inf'), None))
+        return misdetection_hyp, hyps
 
     def _zs_to_hyps(self, ppps, zs, current_time):
         return [
@@ -215,6 +276,8 @@ ppps = [
 zs = [
     np.array([[15], [15]], dtype=np.float32),
     np.array([[20], [20]], dtype=np.float32),
+    np.array([[250], [30]], dtype=np.float32),
+    np.array([[260], [240]], dtype=np.float32),
 ]
 
 p = PMBMPredictor(
@@ -234,6 +297,9 @@ u = PMBMUpdater(
 )
 
 s = u(state, zs, 0)
+h = s[0][1]
+
+a = u._hyp_to_hyps(h, zs)
 '''
 from sklearn import datasets
 from scipy.stats import multivariate_normal
@@ -245,8 +311,20 @@ z = np.random.normal(size=(ndim, 1))
 x = np.random.normal(size=(ndim, 1))
 s = datasets.make_spd_matrix(ndim, random_state=0)
 
-a = z.T @ np.linalg.inv(s)
 
+def pdf(x, mean, S):
+    Nz, _ = x.shape
+    V = np.linalg.cholesky(S)  # NzXNz
+    S_inv_sqrt = np.linalg.inv(V)  # NzXNz
+    S_inv = S_inv_sqrt.T @ S_inv_sqrt  # NzXNz
+    S_log_det = 2 * np.log(np.prod(np.diag(V)))  # float
+
+    x_minus_mean = x - mean
+    distance = float(x_minus_mean.T @ S_inv @ x_minus_mean)
+    return -0.5 * (distance + S_log_det + Nz * math.log(math.pi * 2))
+'''
+
+'''
 # z = [1.76405235;0.40015721;0.97873798;2.2408932]
 # s = [ 1.00665013, -1.41434036, -0.4953264 , -0.43520063;-1.41434036,  3.81637179,  0.58656485,  0.5053143;-0.4953264 ,  0.58656485,  0.87865608,  0.00746661;-0.43520063,  0.5053143 ,  0.00746661,  0.79932913]
 # x = [1.86755799;-0.97727788;0.95008842;-0.15135721]

@@ -104,11 +104,19 @@ class PMBMUpdater(object):
         ppps = self._update_ppps(state.ppps)
 
         ppp_hyp_entries = self._zs_to_hyp_entries(state.ppps, zs, current_time)
-        hyps = list(
-            itertools.chain(*[
-                self._hyp_to_hyps(hyp, ppp_hyp_entries, zs)
-                for hyp in state.hyps
-            ]))
+        if state.hyps:
+            hyps = list(
+                itertools.chain(*[
+                    self._hyp_to_hyps(hyp, ppp_hyp_entries, zs)
+                    for hyp in state.hyps
+                ]))
+        else:
+            hyps = [
+                Hyp(
+                    weight=1.,
+                    entries=[entry for _, entry in ppp_hyp_entries],
+                )
+            ]
         return State(hyps=hyps, ppps=ppps)
 
     def _hyp_to_hyps(self, hyp, ppp_hyp_entries, zs):
@@ -117,7 +125,7 @@ class PMBMUpdater(object):
 
         cost = np.full(
             shape=(num_prev_tracks + num_new_tracks, num_new_tracks),
-            fill_value=np.finfo('f').max,
+            fill_value=np.finfo('f').min,
             dtype=np.float32,
         )
         misdetection_cost = np.zeros(num_prev_tracks, dtype=np.float32)
@@ -326,6 +334,7 @@ p = PMBMPredictor(
     ppps,
 )
 
+'''
 s = State(hyps=[
     Hyp(1.0,
         entries=[
@@ -340,6 +349,8 @@ s = State(hyps=[
             )
         ])
 ], )
+'''
+s = State()
 
 s = p(s, time_interval)
 

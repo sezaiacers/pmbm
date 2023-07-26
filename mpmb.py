@@ -234,7 +234,7 @@ class PMBMUpdater(object):
                 ),
                 name=name,
                 start_time=start_time,
-                hist=hist + [0],
+                hist=hist + [-1],
             ),
         )
 

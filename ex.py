@@ -21,6 +21,7 @@ class Gaussian(NamedTuple):
 class HypEntry(NamedTuple):
     prob: float
     gauss: Gaussian
+    name: str
     start_time: int
     hist: Sequence[int]
 
@@ -80,9 +81,10 @@ class PMBMPredictor(object):
                             mu=F @ mu,
                             covar=F @ covar @ F.T + Q,
                         ),
+                        name=name,
                         start_time=start_time,
                         hist=hist,
-                    ) for prob, (mu, covar), start_time, hist in entries
+                    ) for prob, (mu, covar), name, start_time, hist in entries
                 ],
             ) for weight, entries in state.hyps
         ]
@@ -187,7 +189,7 @@ class PMBMUpdater(object):
     def _hyp_entry_to_hyp_entries(self, hyp, zs):
         Nz, Nx = np.shape(self._H)
 
-        prob, (mu, covar), start_time, hist = hyp
+        prob, (mu, covar), name, start_time, hist = hyp
 
         misdetection_hyp = (
             math.log(1. - prob + prob * self._misdetection_probability),
@@ -198,6 +200,7 @@ class PMBMUpdater(object):
                     mu=mu,
                     covar=covar,
                 ),
+                name=name,
                 start_time=start_time,
                 hist=hist + [0],
             ),
@@ -231,6 +234,7 @@ class PMBMUpdater(object):
                             mu=x,
                             covar=P,
                         ),
+                        name=name,
                         start_time=start_time,
                         hist=hist + [i],
                     ),
@@ -295,6 +299,7 @@ class PMBMUpdater(object):
                         mu=mu,
                         covar=covar,
                     ),
+                    name=str(uuid.uuid4()),
                     start_time=current_time,
                     hist=[i],
                 ),
@@ -308,6 +313,7 @@ class PMBMUpdater(object):
                         mu=np.zeros((Nx, 1), dtype=np.float32),
                         covar=np.zeros((Nx, Nx), dtype=np.float32),
                     ),
+                    name=str(uuid.uuid4()),
                     start_time=current_time,
                     hist=[i],
                 ),
@@ -381,6 +387,7 @@ s = State(hyps=[
                     mu=np.array([[10], [1], [20], [2]], dtype=np.float32),
                     covar=np.diag([10, 3, 4, 20]),
                 ),
+                name=str(uuid.uuid4()),
                 start_time=0,
                 hist=[1, 3],
             )

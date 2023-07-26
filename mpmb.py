@@ -12,11 +12,37 @@ import opt
 
 from models import CombinedTransitionModel, ConstantVelocity, MeasurementModel
 
+class Elipse(NamedTuple):
+    center: Sequence[float]
+    width: float
+    height: float
+    angle: float
 
 class Gaussian(NamedTuple):
     mu: np.ndarray
     covar: np.ndarray
 
+    def Elipse(self, mapping=None):
+        if mapping is None:
+            w, v = np.linalg.eig(self.covar)
+        else:
+            HH = np.eye(self.mu.size)[(0, 2), :]
+            w, v = np.linalg.eig(HH @ self.covar @ HH.T)
+
+        max_ind = np.argmax(w)
+        min_ind = np.argmin(w)
+        orient = np.arctan2(v[1, max_ind], v[0, max_ind])
+
+        if mapping is None:
+            center = self.mu.reshape(-1).tolist()
+        else:
+            center = self.mu[mapping, 0].tolist()
+
+        width = float(2 * np.sqrt(w[max_ind]))
+        height = float(2 * np.sqrt(w[min_ind]))
+        angle = float(np.rad2deg(orient))
+
+        return Elipse(center, width, height, angle)
 
 class HypEntry(NamedTuple):
     prob: float
@@ -185,6 +211,7 @@ class PMBMUpdater(object):
                 if i < num_prev_tracks:
                     new_hyp_entry[i] = entry_to_entries[i][1][1]
             weight = assoc_cost + misdetection_cost_sum + math.log(hyp.weight)
+
             hyps.append(Hyp(
                 weight=weight,
                 entries=new_hyp_entry,
@@ -362,7 +389,7 @@ class PMBMPruner(object):
                     if entry.prob >= self._existence_pruning_threshold
                 ],
             ) for weight, entries in state.hyps
-            if hyp.weight >= self._hyp_pruning_threshold
+            if weight >= self._hyp_pruning_threshold
         ]
 
         hyps = [hyp for hyp in hyps

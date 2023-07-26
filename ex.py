@@ -40,6 +40,12 @@ class State(NamedTuple):
     ppps: Sequence[PPP] = []
 
 
+def softmax(xs):
+    xs -= xs.max()
+    xs = np.exp(xs)
+    return xs / xs.sum()
+
+
 class PMBMPredictor(object):
     def __init__(self, survival_probability, transition_model, ppps):
         self._survival_probability = survival_probability
@@ -113,6 +119,17 @@ class PMBMUpdater(object):
                     self._hyp_to_hyps(hyp, ppp_hyp_entries, zs)
                     for hyp in state.hyps
                 ]))
+            weights = np.array(
+                [weight for weight, _ in hyps],
+                dtype=np.float32,
+            )
+            weights = softmax(weights).tolist()
+            hyps = [
+                Hyp(
+                    weight=weight,
+                    entries=entries,
+                ) for weight, (_, entries) in zip(weights, hyps)
+            ]
         else:
             hyps = [
                 Hyp(
@@ -154,7 +171,8 @@ class PMBMUpdater(object):
         misdetection_cost_sum = float(np.sum(misdetection_cost))
 
         hyps = []
-        for assoc, assoc_cost in  zip(*opt.murty(cost.T.tolist(), self._num_max_hyps)):
+        for assoc, assoc_cost in zip(
+                *opt.murty(cost.T.tolist(), self._num_max_hyps)):
             new_hyp_entry = deepcopy(hyp_entry)
             for i in assoc:
                 if i < num_prev_tracks:
@@ -165,7 +183,6 @@ class PMBMUpdater(object):
                 entries=new_hyp_entry,
             ))
         return hyps
-
 
     def _hyp_entry_to_hyp_entries(self, hyp, zs):
         Nz, Nx = np.shape(self._H)

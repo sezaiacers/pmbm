@@ -207,9 +207,9 @@ class PMBMUpdater(object):
         for assoc, assoc_cost in zip(
                 *opt.murty(cost.T.tolist(), self._num_max_hyps)):
             new_hyp_entry = deepcopy(hyp_entry)
-            for i in assoc:
+            for j, i in enumerate(assoc):
                 if i < num_prev_tracks:
-                    new_hyp_entry[i] = entry_to_entries[i][1][1]
+                    new_hyp_entry[i] = entry_to_entries[i][1][j][1]
             weight = assoc_cost + misdetection_cost_sum + math.log(hyp.weight)
 
             hyps.append(Hyp(
@@ -394,6 +394,19 @@ class PMBMPruner(object):
 
         hyps = [hyp for hyp in hyps
                 if len(hyp.entries) > 0][:self._num_max_hyps]
+
+        normalizer = sum([
+            weight
+            for weight, _ in hyps
+        ])
+
+        hyps = [
+            Hyp(
+                weight=weight / normalizer,
+                entries=entries,
+            )
+            for weight, entries in hyps
+        ]
 
         return State(hyps=hyps, ppps=ppps)
 

@@ -48,7 +48,12 @@ def softmax(xs):
 
 
 class PMBMPredictor(object):
-    def __init__(self, survival_probability, transition_model, ppps):
+    def __init__(
+        self,
+        survival_probability,
+        transition_model,
+        ppps,
+    ):
         self._survival_probability = survival_probability
 
         self._transition_model = transition_model
@@ -128,9 +133,9 @@ class PMBMUpdater(object):
             weights = softmax(weights).tolist()
             hyps = [
                 Hyp(
-                    weight=weight,
-                    entries=entries,
-                ) for weight, (_, entries) in zip(weights, hyps)
+                    weight=weights[ind],
+                    entries=hyps[ind][1],
+                ) for ind in np.argsort(weights)[::-1].tolist()
             ]
         else:
             hyps = [
@@ -331,6 +336,36 @@ class PMBMUpdater(object):
         ]
 
 
+class PMBMPruner(object):
+    def __init__(
+        self,
+        poisson_pruning_threshold,
+        hyp_pruning_threshold,
+        existence_pruning_threshold,
+        num_max_hyps,
+    ):
+        self._poisson_pruning_threshold = poisson_pruning_threshold
+        self._hyp_pruning_threshold = hyp_pruning_threshold
+        self._existence_pruning_threshold = existence_pruning_threshold
+        self._num_max_hyps = num_max_hyps
+
+    def __call__(self, state):
+        ppps = [
+            ppp for ppp in state.ppps
+            if ppp.weight >= self._poisson_pruning_threshold
+        ]
+        hyps = [
+            Hyp(
+                weight=weight,
+                entries=[
+                    entry for entry in entries
+                    if entry.prob >= self._existence_pruning_threshold
+                ],
+            ) for weight, entries in state.hyps
+            if hyp.weight >= self._hyp_pruning_threshold
+        ]
+
+
 time_interval = timedelta(seconds=1)
 transition_model = CombinedTransitionModel(
     ConstantVelocity(11),
@@ -393,7 +428,7 @@ s = State(hyps=[
             )
         ])
 ], )
-s = State()
+#s = State()
 
 s = p(s, time_interval)
 

@@ -8,6 +8,7 @@ import itertools
 
 import numpy as np
 import math
+import opt
 
 from models import CombinedTransitionModel, ConstantVelocity, MeasurementModel
 
@@ -89,6 +90,7 @@ class PMBMUpdater(object):
         detection_probability,
         clutter_intensity,
         gating_threshold,
+        num_max_hyps,
         H,
         R,
     ):
@@ -96,6 +98,7 @@ class PMBMUpdater(object):
         self._misdetection_probability = 1. - self._detection_probability
         self._gating_threshold = gating_threshold
         self._clutter_intensity = clutter_intensity
+        self._num_max_hyps = num_max_hyps
 
         self._H = H
         self._R = R
@@ -125,12 +128,13 @@ class PMBMUpdater(object):
 
         cost = np.full(
             shape=(num_prev_tracks + num_new_tracks, num_new_tracks),
-            fill_value=np.finfo('f').min,
+            fill_value=np.finfo('float32').min,
             dtype=np.float32,
         )
         misdetection_cost = np.zeros(num_prev_tracks, dtype=np.float32)
 
         entry_to_entries = [None] * num_prev_tracks
+        hyp_entry = [None] * (num_prev_tracks + num_new_tracks)
         for i, entry in enumerate(hyp.entries):
             misdetection_entry, detection_entries = self._hyp_entry_to_hyp_entries(
                 entry, zs)
@@ -141,10 +145,27 @@ class PMBMUpdater(object):
                     cost[i, j] = detection_entry[0] - misdetection_entry[0]
             misdetection_cost[i] = misdetection_entry[0]
 
+            hyp_entry[i] = misdetection_entry[1]
+
         for i, entry in enumerate(ppp_hyp_entries):
             cost[i + num_prev_tracks, i] = entry[0]
+            hyp_entry[i + num_prev_tracks] = entry[1]
 
-        return []
+        misdetection_cost_sum = float(np.sum(misdetection_cost))
+
+        hyps = []
+        for assoc, assoc_cost in  zip(*opt.murty(cost.T.tolist(), self._num_max_hyps)):
+            new_hyp_entry = deepcopy(hyp_entry)
+            for i in assoc:
+                if i < num_prev_tracks:
+                    new_hyp_entry[i] = entry_to_entries[i][1][1]
+            weight = assoc_cost + misdetection_cost_sum + math.log(hyp.weight)
+            hyps.append(Hyp(
+                weight=weight,
+                entries=new_hyp_entry,
+            ))
+        return hyps
+
 
     def _hyp_entry_to_hyp_entries(self, hyp, zs):
         Nz, Nx = np.shape(self._H)
@@ -334,7 +355,6 @@ p = PMBMPredictor(
     ppps,
 )
 
-'''
 s = State(hyps=[
     Hyp(1.0,
         entries=[
@@ -349,7 +369,6 @@ s = State(hyps=[
             )
         ])
 ], )
-'''
 s = State()
 
 s = p(s, time_interval)
@@ -358,6 +377,7 @@ u = PMBMUpdater(
     0.9,
     0.001,
     20,
+    4,
     measurement_model.H(),
     measurement_model.R(),
 )

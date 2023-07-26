@@ -365,6 +365,13 @@ class PMBMPruner(object):
             if hyp.weight >= self._hyp_pruning_threshold
         ]
 
+        hyps = [
+            hyp
+            for hyp in hyps if len(hyp.entries) > 0
+        ][:self._num_max_hyps]
+
+        return State(hyps=hyps, ppps=ppps)
+
 
 time_interval = timedelta(seconds=1)
 transition_model = CombinedTransitionModel(

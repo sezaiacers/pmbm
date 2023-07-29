@@ -49,7 +49,7 @@ class HypEntry(NamedTuple):
     gauss: Gaussian
     name: str
     start_time: int
-    hist: Sequence[int]
+    hist: Sequence[Tuple[int, int]]
 
 
 class Hyp(NamedTuple):
@@ -149,7 +149,7 @@ class PMBMUpdater(object):
         if state.hyps:
             hyps = list(
                 itertools.chain(*[
-                    self._hyp_to_hyps(hyp, ppp_hyp_entries, zs)
+                    self._hyp_to_hyps(hyp, ppp_hyp_entries, zs, current_time)
                     for hyp in state.hyps
                 ]))
             weights = np.array(
@@ -172,7 +172,7 @@ class PMBMUpdater(object):
             ]
         return State(hyps=hyps, ppps=ppps)
 
-    def _hyp_to_hyps(self, hyp, ppp_hyp_entries, zs):
+    def _hyp_to_hyps(self, hyp, ppp_hyp_entries, zs, current_time):
         num_prev_tracks = len(hyp.entries)
         num_new_tracks = len(ppp_hyp_entries)
 
@@ -187,7 +187,7 @@ class PMBMUpdater(object):
         hyp_entry = [None] * (num_prev_tracks + num_new_tracks)
         for i, entry in enumerate(hyp.entries):
             misdetection_entry, detection_entries = self._hyp_entry_to_hyp_entries(
-                entry, zs)
+                entry, zs, current_time)
             entry_to_entries[i] = (misdetection_entry, detection_entries)
 
             for j, detection_entry in enumerate(detection_entries):
@@ -218,7 +218,7 @@ class PMBMUpdater(object):
             ))
         return hyps
 
-    def _hyp_entry_to_hyp_entries(self, hyp, zs):
+    def _hyp_entry_to_hyp_entries(self, hyp, zs, current_time):
         Nz, Nx = np.shape(self._H)
 
         prob, (mu, covar), name, start_time, hist = hyp
@@ -234,7 +234,7 @@ class PMBMUpdater(object):
                 ),
                 name=name,
                 start_time=start_time,
-                hist=hist + [-1],
+                hist=hist + [(-1, current_time)],
             ),
         )
 
@@ -268,7 +268,7 @@ class PMBMUpdater(object):
                         ),
                         name=name,
                         start_time=start_time,
-                        hist=hist + [i],
+                        hist=hist + [(i, current_time)],
                     ),
                 ))
             else:
@@ -333,7 +333,7 @@ class PMBMUpdater(object):
                     ),
                     name=str(uuid.uuid4()),
                     start_time=current_time,
-                    hist=[i],
+                    hist=[(i, current_time)],
                 ),
             )
         else:
@@ -347,7 +347,7 @@ class PMBMUpdater(object):
                     ),
                     name=str(uuid.uuid4()),
                     start_time=current_time,
-                    hist=[i],
+                    hist=[(i, current_time)],
                 ),
             )
 

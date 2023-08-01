@@ -66,12 +66,10 @@ class State(NamedTuple):
     hyps: Sequence[Hyp] = []
     ppps: Sequence[PPP] = []
 
-
 def softmax(xs):
     xs -= xs.max()
     xs = np.exp(xs)
     return xs / xs.sum()
-
 
 class PMBMPredictor(object):
     def __init__(
@@ -121,7 +119,6 @@ class PMBMPredictor(object):
         ]
 
         return State(hyps, ppps)
-
 
 class PMBMUpdater(object):
     def __init__(

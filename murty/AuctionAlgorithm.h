@@ -8,7 +8,7 @@
 #ifndef AUCTIONALGORITHM_H_
 #define AUCTIONALGORITHM_H_
 
-#include "eigen/Eigen/Core"
+#include <Eigen/Dense>
 #include <vector>
 #include <iostream>
 

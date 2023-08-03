@@ -12,11 +12,13 @@ import opt
 
 from models import CombinedTransitionModel, ConstantVelocity, MeasurementModel
 
+
 class Elipse(NamedTuple):
     center: Sequence[float]
     width: float
     height: float
     angle: float
+
 
 class Gaussian(NamedTuple):
     mu: np.ndarray
@@ -44,6 +46,7 @@ class Gaussian(NamedTuple):
 
         return Elipse(center, width, height, angle)
 
+
 class HypEntry(NamedTuple):
     prob: float
     gauss: Gaussian
@@ -66,10 +69,12 @@ class State(NamedTuple):
     hyps: Sequence[Hyp] = []
     ppps: Sequence[PPP] = []
 
+
 def softmax(xs):
     xs -= xs.max()
     xs = np.exp(xs)
     return xs / xs.sum()
+
 
 class PMBMPredictor(object):
     def __init__(
@@ -119,6 +124,7 @@ class PMBMPredictor(object):
         ]
 
         return State(hyps, ppps)
+
 
 class PMBMUpdater(object):
     def __init__(
@@ -392,125 +398,13 @@ class PMBMPruner(object):
         hyps = [hyp for hyp in hyps
                 if len(hyp.entries) > 0][:self._num_max_hyps]
 
-        normalizer = sum([
-            weight
-            for weight, _ in hyps
-        ])
+        normalizer = sum([weight for weight, _ in hyps])
 
         hyps = [
             Hyp(
                 weight=weight / normalizer,
                 entries=entries,
-            )
-            for weight, entries in hyps
+            ) for weight, entries in hyps
         ]
 
         return State(hyps=hyps, ppps=ppps)
-
-
-'''
-time_interval = timedelta(seconds=1)
-transition_model = CombinedTransitionModel(
-    ConstantVelocity(11),
-    ConstantVelocity(12),
-)
-measurement_model = MeasurementModel(
-    ndim=4,
-    mapping=(0, 2),
-    covar=np.diag([5, 5]).astype(np.float32),
-)
-ppps = [
-    PPP(
-        weight=0.1,
-        gauss=Gaussian(
-            mu=np.array([[10], [0], [10], [0]], dtype=np.float32),
-            covar=np.diag([10, 0, 10, 0]),
-        ),
-    ),
-    PPP(
-        weight=0.1,
-        gauss=Gaussian(
-            mu=np.array([[20], [0], [20], [0]], dtype=np.float32),
-            covar=np.diag([10, 0, 10, 0]),
-        ),
-    ),
-    PPP(
-        weight=0.1,
-        gauss=Gaussian(
-            mu=np.array([[30], [0], [30], [0]], dtype=np.float32),
-            covar=np.diag([10, 0, 10, 0]),
-        ),
-    ),
-]
-
-zs = [
-    np.array([[15], [15]], dtype=np.float32),
-    np.array([[20], [20]], dtype=np.float32),
-    np.array([[250], [30]], dtype=np.float32),
-    np.array([[260], [240]], dtype=np.float32),
-]
-
-p = PMBMPredictor(
-    0.9,
-    transition_model,
-    ppps,
-)
-
-s = State(hyps=[
-    Hyp(1.0,
-        entries=[
-            HypEntry(
-                prob=0.7,
-                gauss=Gaussian(
-                    mu=np.array([[10], [1], [20], [2]], dtype=np.float32),
-                    covar=np.diag([10, 3, 4, 20]),
-                ),
-                name=str(uuid.uuid4()),
-                start_time=0,
-                hist=[1, 3],
-            )
-        ])
-], )
-#s = State()
-
-s = p(s, time_interval)
-
-u = PMBMUpdater(
-    0.9,
-    0.001,
-    20,
-    4,
-    measurement_model.H(),
-    measurement_model.R(),
-)
-
-s = u(s, zs, 0)
-'''
-'''
-from sklearn import datasets
-from scipy.stats import multivariate_normal
-
-np.random.seed(0)
-ndim = 4
-
-z = np.random.normal(size=(ndim, 1))
-x = np.random.normal(size=(ndim, 1))
-s = datasets.make_spd_matrix(ndim, random_state=0)
-
-
-def pdf(x, mean, S):
-    Nz, _ = x.shape
-    V = np.linalg.cholesky(S)  # NzXNz
-    S_inv_sqrt = np.linalg.inv(V)  # NzXNz
-    S_inv = S_inv_sqrt.T @ S_inv_sqrt  # NzXNz
-    S_log_det = 2 * np.log(np.prod(np.diag(V)))  # float
-
-    x_minus_mean = x - mean
-    distance = float(x_minus_mean.T @ S_inv @ x_minus_mean)
-    return -0.5 * (distance + S_log_det + Nz * math.log(math.pi * 2))
-'''
-'''
-# z = [1.76405235;0.40015721;0.97873798;2.2408932]
-# s = [ 1.00665013, -1.41434036, -0.4953264 , -0.43520063;-1.41434036,  3.81637179,  0.58656485,  0.5053143;-0.4953264 ,  0.58656485,  0.87865608,  0.00746661;-0.43520063,  0.5053143 ,  0.00746661,  0.79932913]
-# x = [1.86755799;-0.97727788;0.95008842;-0.15135721]
-'''

@@ -20,10 +20,11 @@ transition_model = CombinedTransitionModel(
     ConstantVelocity(200),
     ConstantVelocity(200),
 )
+
 measurement_model = MeasurementModel(
     ndim=4,
     mapping=(0, 2),
-    covar=np.diag([120, 120]).astype(np.float32),
+    covar=np.diag([200, 200]).astype(np.float32),
 )
 
 h, w = 600, 800
@@ -77,7 +78,7 @@ detector = get_detector(
 
 i = 0
 extractor = CenterBoxPointExtractor()
-time_interval = timedelta(milliseconds=(1000 // 1))
+time_interval = timedelta(seconds=2)
 state = State()
 
 max_index = 1000
@@ -180,12 +181,14 @@ while True:
                     color,
                     1,
                 )
+                '''
                 try:
                     frames[i] = cv.ellipse(frames[i], (int(cx), int(cy)),
                                            (int(w), int(h)), angle, 0, 360,
                                            color, 4)
                 except:
                     pass
+                '''
 
                 prev_z = None
                 for ind, z_time in hist:

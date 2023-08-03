@@ -297,17 +297,13 @@ class MBMPruner(object):
         hyps = [hyp for hyp in hyps
                 if len(hyp.entries) > 0][:self._num_max_hyps]
 
-        normalizer = sum([
-            weight
-            for weight, _ in hyps
-        ])
+        normalizer = sum([weight for weight, _ in hyps])
 
         hyps = [
             Hyp(
                 weight=weight / normalizer,
                 entries=entries,
-            )
-            for weight, entries in hyps
+            ) for weight, entries in hyps
         ]
 
         return State(hyps)

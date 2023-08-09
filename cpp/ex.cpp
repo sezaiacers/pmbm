@@ -279,6 +279,10 @@ struct PMBMFilter {
     for (const auto &ppp : ppps_) {
       const auto weight = ppp.weight * (1.f - detection_probability_);
       if (weight >= poisson_pruning_threshold_) {
+        ppps.push_back(PPP<Scalar, StateDim>{
+            weight,
+            std::move(ppp.gauss),
+        });
       }
     }
   }

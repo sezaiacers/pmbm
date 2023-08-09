@@ -114,13 +114,19 @@ template <typename Scalar> struct TransitionModel {
 
 template <typename Scalar, size_t StateDim, size_t MeasurementDim>
 struct PMBMFilter {
+  std::vector<PPP<float, StateDim>> ppps_;
+
   TransitionModel<Scalar> transition_model_;
   MeasurementModel<Scalar> measurement_model_;
 
   Scalar survival_probability_;
   Scalar detection_probability_;
   Scalar clutter_intensity_;
+
   Scalar gating_threshold_;
+  Scalar poisson_pruning_threshold_;
+  Scalar hyp_pruning_threshold_;
+  Scalar existence_pruning_threshold_;
 
   struct PredictAndUpdateHypContext {
     const std::vector<Hyp<Scalar, StateDim>> &hyps;
@@ -211,7 +217,7 @@ struct PMBMFilter {
     }
   }
 
-  void operator()(State<Scalar, StateDim> &state,
+  void operator()(State<Scalar, StateDim> state,
                   std::vector<Eigen::Matrix<Scalar, MeasurementDim, 1>> zs,
                   uint64_t current_time, float time_interval) {
 
@@ -220,6 +226,8 @@ struct PMBMFilter {
     const auto F = transition_model_.F(time_interval);
     const auto Q = transition_model_.Q(time_interval);
 
+
+    // PREDICTION AND UPDATE STEP OF MBM
     size_t max_entries = 0;
     std::vector<HypEntry<Scalar, StateDim> *> hyp_to_entries;
     hyp_to_entries.reserve(state.hyps.size());
@@ -253,6 +261,25 @@ struct PMBMFilter {
       const auto end = std::chrono::steady_clock::now();
       const std::chrono::duration<double> elapsed_seconds = end - start;
       std::cout << elapsed_seconds.count() << '\n';
+    }
+
+    // PREDICTION STEP OF PPP'S
+    std::vector<PPP<Scalar, StateDim>> pred_ppps = ppps_;
+    pred_ppps.reserve(state.ppps.size() + ppps_.size());
+    for (const auto &ppp : state.ppps) {
+      pred_ppps.push_back(PPP<Scalar, StateDim>{
+          ppp.weight * survival_probability_,
+          Gaussian<Scalar, StateDim>{F * ppp.gauss.mu,
+                                     F * ppp.gauss.covar * F.transpose() + Q}});
+    }
+
+    /// UPDATE AND PRUNER PPPS
+    std::vector<PPP<Scalar, StateDim>> ppps;
+    ppps.reserve(pred_ppps.size());
+    for (const auto &ppp : ppps_) {
+      const auto weight = ppp.weight * (1.f - detection_probability_);
+      if (weight >= poisson_pruning_threshold_) {
+      }
     }
   }
 };
@@ -346,10 +373,37 @@ int main(int argc, char **argv) {
   auto state = StateFromJson(cfg);
   auto zs = ZsFromJSon(cfg);
 
-  TransitionModel<float> transition_model{10.f, 10.f};
-  MeasurementModel<float> measurement_model{120, 90};
+  size_t h = 600, w = 800;
+  size_t nh = 8, nw = 8;
+  std::vector<PPP<float, 4>> ppps;
+  float ppp_weight = 0.001;
+  for (size_t i = 0; i < nw; ++i) {
+    for (size_t j = 0; j < nh; ++j) {
+      Gaussian<float, 4> gauss;
+      gauss.mu.setZero();
+      gauss.covar.setZero();
 
-  PMBMFilter<float, 4, 2> filter{transition_model, measurement_model};
+      const auto ww = static_cast<float>(w) / static_cast<float>(nw);
+      const auto hh = static_cast<float>(h) / static_cast<float>(nh);
+      const auto fi = static_cast<float>(i);
+      const auto fj = static_cast<float>(j);
+
+      gauss.mu(0, 0) = (fi + 0.5f) * ww;
+      gauss.mu(2, 0) = (fj + 0.5f) * hh;
+
+      gauss.covar(0, 0) = ww;
+      gauss.covar(1, 1) = 1;
+      gauss.covar(2, 2) = hh;
+      gauss.covar(3, 3) = 1;
+
+      ppps.push_back(PPP<float, 4>{ppp_weight, gauss});
+    }
+  }
+
+  TransitionModel<float> transition_model{120.f, 120.f};
+  MeasurementModel<float> measurement_model{100.f, 100.f};
+
+  PMBMFilter<float, 4, 2> filter{ppps, transition_model, measurement_model};
 
   for (int i = 0; i < 1000; ++i)
     state.hyps.push_back(state.hyps[0]);

@@ -83,6 +83,14 @@ struct Track {
 };
 
 template <typename Scalar, size_t Size> struct MultivariateGaussian {
+  MultivariateGaussian() = default;
+
+  template<typename Mean, typename Covariance>
+  MultivariateGaussian(Mean&& mean, Covariance&& covariance):
+    mean{std::forward<Mean>(mean)},
+    covariance{std::forward<Covariance>(covariance)} { }
+
+
   Eigen::Matrix<Scalar, Size, 1> mean;
   Eigen::Matrix<Scalar, Size, Size> covariance;
 };
@@ -238,6 +246,29 @@ struct PoissonMultiBernoulliMixtureFilter {
       }
     }
 
+    // PREDICTION OF POISSON POINT PROCESS
+    PoissonPointProcess<Scalar, StateSize> pred_poisson_point_process;
+    const auto num_poisson_point_process_distributions =
+        state.poisson_point_process.weights.size() +
+        poisson_point_process_.weights.size();
+
+    pred_poisson_point_process.weights.reserve(num_poisson_point_process_distributions);
+    pred_poisson_point_process.distributions.reserve(num_poisson_point_process_distributions);
+
+    // ADD NEW POISSON POINT PROCESS DISTRIBUTIONS
+    for (size_t i = 0; i < poisson_point_process_.weights.size(); ++i) {
+      pred_poisson_point_process.distributions.emplace_back(
+          poisson_point_process_.distributions[i]);
+      pred_poisson_point_process.weights.emplace_back(poisson_point_process_.weights[i]);
+    }
+
+    // PRED PREV POISSON POINT PROCESS DISTRIBUTIONS                                            
+    for (size_t i = 0; i < state.poisson_point_process.weights.size(); ++i) {
+      pred_poisson_point_process.distributions.emplace_back(
+          F * state.poisson_point_process.distributions[i].mean,
+          F * state.poisson_point_process.distributions[i].covariance * F.transpose() + Q);
+      pred_poisson_point_process.weights.emplace_back(state.poisson_point_process.weights[i]);
+    }
     return State<Scalar, StateSize>{};
   }
 };

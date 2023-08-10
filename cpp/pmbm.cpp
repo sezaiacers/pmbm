@@ -212,9 +212,27 @@ struct PoissonMultiBernoulliMixtureFilter {
           const auto distance =
               (z_minus_z_pred.transpose() * S_inv * z_minus_z_pred)[0, 0];
           if (distance < gating_threshold_) {
+            const auto u_covariance = (I - K * H) * pred_covariance;
+            const auto covariance = (u_covariance + u_covariance.transpose()) * 0.5f;
 
+            const auto mean = pred_mean + K * z_minus_z_pred;
 
+            const auto log_weight =
+                std::log(pred_prob * detection_probability_) -
+                0.5f *
+                    (distance + S_log_det +
+                     static_cast<Scalar>(MeasurementSize) * 1.8378770664093453f);
 
+            pred_upd_multi_bernoulli.emplace_back(
+                1.f,
+                MultivariateGaussian<Scalar, StateSize>{mean, covariance},
+                bernoulli.track.Append(static_cast<int>(k), current_time)
+            );
+            pred_upd_multi_bernoulli_log_weights.emplace_back(log_weight);
+          } else {
+            pred_upd_multi_bernoulli.emplace_back();
+            pred_upd_multi_bernoulli_log_weights.emplace_back(
+                std::numeric_limits<float>::min());
           }
         }
       }

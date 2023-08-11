@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -143,8 +144,11 @@ struct PoissonMultiBernoulliMixtureFilter {
 
   Scalar survival_probability_;
   Scalar detection_probability_;
+  Scalar clutter_intensity_;
 
   Scalar gating_threshold_;
+
+  uint32_t id_;
 
   State<Scalar, StateSize>
   operator()(State<Scalar, StateSize> state,
@@ -269,13 +273,88 @@ struct PoissonMultiBernoulliMixtureFilter {
           F * state.poisson_point_process.distributions[i].covariance * F.transpose() + Q);
       pred_poisson_point_process.weights.emplace_back(state.poisson_point_process.weights[i]);
     }
+
+    // ADD NEW MULTI-BERNOULLI
+
+    MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
+    std::vector<Scalar> new_multi_bernoulli_log_weights;
+
+    new_multi_bernoulli.reserve(measurements.size());
+    new_multi_bernoulli_log_weights.reserve(measurements.size());
+    for (size_t i = 0; i < measurements.size(); ++i) {
+      const auto& z = measurements[i];
+
+      Scalar prob = 0.f;
+      Scalar weight = 0.f;
+      Eigen::Matrix<Scalar, StateSize, 1> mean;
+      Eigen::Matrix<Scalar, StateSize, StateSize> covariance;
+
+      mean.setZero();
+      covariance.setZero();
+
+      bool assigned = false;
+      for (size_t j = 0; j < pred_poisson_point_process.weights.size(); ++j) {
+        const auto& distribution = pred_poisson_point_process.distributions[j];
+        const auto& distribution_weight = pred_poisson_point_process.weights[j];
+
+        const auto S = H * distribution.covariance * H.transpose() + R;
+        const auto S_inv = S.inverse();
+
+        const auto z_pred = H * distribution.mean;
+        const auto z_minus_z_pred = z - z_pred;
+
+        const auto distance =
+            (z_minus_z_pred.transpose() * S_inv * z_minus_z_pred)[0, 0];
+        if (distance < gating_threshold_) {
+          const auto S_log_det = std::log(S.determinant());
+
+          const auto K = distribution.covariance * H.transpose() * S_inv;
+
+          const auto p_u_covariance = (I - K * H) * distribution.covariance;
+          const auto p_covariance =
+              (p_u_covariance + p_u_covariance.transpose()) * 0.5f;
+
+          const auto p_mean = distribution.mean + K * z_minus_z_pred;
+
+          const auto p_weight = (detection_probability_ * distribution_weight) *
+                                (-0.5 * (distance + S_log_det +
+                                         static_cast<Scalar>(MeasurementSize) *
+                                             1.8378770664093453f));
+
+
+          weight += p_weight;
+          mean += (p_weight * p_mean);
+          covariance += (p_weight * (p_covariance + p_mean * p_mean.transpose()));
+
+          assigned = true;
+        }
+      }
+
+      if (assigned) {
+        mean /= weight;
+        covariance = covariance / weight - mean * mean.transpose();
+
+        prob = weight;
+        weight += clutter_intensity_;
+        prob /= weight;
+
+      } else {
+        prob = 0.f;
+        weight = clutter_intensity_;
+      }
+
+      new_multi_bernoulli.emplace_back(
+          prob,
+          MultivariateGaussian<Scalar, StateSize>{std::move(mean), std::move(covariance)},
+          Track{id_++, current_time, {std::make_tuple(static_cast<int>(i), current_time)}}
+      );
+      new_multi_bernoulli_log_weights.emplace_back(std::log(weight));
+    }
+
     return State<Scalar, StateSize>{};
   }
 };
 
-struct A {
-  int a;
-};
 
 int main(int argc, char **argv) {
   TransitionModel<float> transition_model{120.f, 120.f};
@@ -289,6 +368,5 @@ int main(int argc, char **argv) {
   State<float, 4> a{};
   Measurements<float, 2> m{};
   f(a, m, 4, 5.f);
-
 
 }

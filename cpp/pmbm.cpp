@@ -150,6 +150,9 @@ struct PoissonMultiBernoulliMixtureFilter {
 
   uint32_t id_;
 
+  size_t num_association_;
+  size_t num_hypothesis_;
+
   State<Scalar, StateSize>
   operator()(State<Scalar, StateSize> state,
              Measurements<Scalar, MeasurementSize> measurements,
@@ -351,10 +354,49 @@ struct PoissonMultiBernoulliMixtureFilter {
       new_multi_bernoulli_log_weights.emplace_back(std::log(weight));
     }
 
+
+
+    // ASSOCIATE
+    std::vector<MultiBernoulli<Scalar, StateSize>> multi_bernoullis;
+    std::vector<Scalar> weights;
+
+    const auto max_num_hypothesis =
+        ComputeMaxNumHypothesis(state.multi_bernoulli_mixture.probs);
+    multi_bernoullis.reserve(max_num_hypothesis);
+    weights.reserve(max_num_hypothesis);
+
+    for (size_t i = 0; i < state.multi_bernoulli_mixture.probs.size(); ++i) {
+      const auto prob = state.multi_bernoulli_mixture.probs[i];
+
+      const auto num_pred_upd_multi_bernoulli =
+          state.multi_bernoulli_mixture.multi_bernoullis[i].size();
+      const auto num_new_multi_bernoulli = new_multi_bernoulli.size();
+
+      const auto &pred_upd_multi_bernoulli = pred_upd_multi_bernoullis[i];
+      const auto &pred_upd_multi_bernoulli_log_weights =
+          pred_upd_multi_bernoullis_log_weights[i];
+
+      auto cost = Eigen::Matrix<double, -1, -1>(num_new_multi_bernoulli,
+                                                num_pred_upd_multi_bernoulli +
+                                                    num_new_multi_bernoulli);
+    }
+
     return State<Scalar, StateSize>{};
   }
-};
 
+  inline size_t ComputeMaxNumHypothesis(const std::vector<Scalar>& probs) {
+    size_t max_num_hypothesis = 0;
+    for (const auto& prob: probs) {
+      max_num_hypothesis += ComputeNumAssociation(prob);
+    }
+  }
+
+  inline size_t ComputeNumAssociation(const Scalar prob) {
+    return std::max(num_association_,
+                    static_cast<size_t>(std::ceil(
+                        prob * static_cast<Scalar>(num_hypothesis_))));
+  }
+};
 
 int main(int argc, char **argv) {
   TransitionModel<float> transition_model{120.f, 120.f};
@@ -368,5 +410,6 @@ int main(int argc, char **argv) {
   State<float, 4> a{};
   Measurements<float, 2> m{};
   f(a, m, 4, 5.f);
+
 
 }

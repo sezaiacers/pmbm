@@ -152,6 +152,7 @@ struct PoissonMultiBernoulliMixtureFilter {
   Scalar gating_threshold_;
   Scalar poisson_pruning_threshold_;
   Scalar existence_pruning_threshold_;
+  Scalar hypothesis_pruning_threshold_;
 
   uint32_t id_;
 
@@ -504,21 +505,41 @@ struct PoissonMultiBernoulliMixtureFilter {
 
     const auto I = Eigen::Matrix<Scalar, StateSize, StateSize>::Identity();
 
+    auto pred_poisson_point_process =
+        PredictionOfPoissonPointProcess(state.poisson_point_process, F, Q);
+    auto poisson_point_process =
+        UpdateAndPrunePoissonPointProcess(pred_poisson_point_process);
+
+    MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
+    std::vector<Scalar> new_multi_bernoulli_log_weights;
+    std::tie(new_multi_bernoulli, new_multi_bernoulli_log_weights) =
+        AddNewMultiBernoulli(pred_poisson_point_process, measurements, H, R, I,
+                             current_time);
+
+    if (state.multi_bernoulli_mixture.probs.size() == 0) {
+      MultiBernoulli<Scalar, StateSize> multi_bernoulli;
+      multi_bernoulli.reserve(new_multi_bernoulli.size());
+      for (const auto& bernoulli: new_multi_bernoulli) {
+        if (bernoulli.prob >= existence_pruning_threshold_) {
+          multi_bernoulli.push_back(bernoulli);
+        }
+      }
+
+      return State<Scalar, StateSize>{
+        {
+          {1.f},
+          {std::move(multi_bernoulli)},
+        },
+        std::move(poisson_point_process)
+      };
+    }
+
     std::vector<MultiBernoulli<Scalar, StateSize>> pred_upd_multi_bernoullis;
     std::vector<std::vector<Scalar>> pred_upd_multi_bernoullis_log_weights;
     std::tie(pred_upd_multi_bernoullis, pred_upd_multi_bernoullis_log_weights) =
         PredictionAndUpdateOfMultiBernoulliMixture(
             state.multi_bernoulli_mixture, measurements, F, Q, H, R, I,
             current_time);
-    auto pred_poisson_point_process =
-        PredictionOfPoissonPointProcess(state.poisson_point_process, F, Q);
-
-    MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
-    std::vector<Scalar> new_multi_bernoulli_log_weights;
-
-    std::tie(new_multi_bernoulli, new_multi_bernoulli_log_weights) =
-        AddNewMultiBernoulli(pred_poisson_point_process, measurements, H, R, I,
-                             current_time);
 
     // ASSOCIATE
     std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>> associated_multi_bernoullis;
@@ -532,7 +553,53 @@ struct PoissonMultiBernoulliMixtureFilter {
     return State<Scalar, StateSize>{};
   }
 
-  inline size_t ComputeMaxNumHypothesis(const std::vector<Scalar>& probs) {
+  inline std::vector<std::tuple<Scalar, size_t>>
+  SoftmaxAndSortAndPrune(std::vector<Scalar> weights) {
+    Scalar max = std::numeric_limits<Scalar>::min();
+
+    for (const auto &weight : weights) {
+      max = std::max(max, weight);
+    }
+
+    Scalar sum = 0.f;
+    for (auto &weight : weights) {
+      weight = std::exp(weight);
+      sum += weight;
+    }
+
+    std::vector<std::tuple<Scalar, size_t>> probs_and_inds;
+    probs_and_inds.reserve(weights.size());
+    for (size_t i = 0; i < weights.size(); ++i) {
+      probs_and_inds.emplace_back(weights / sum, i);
+    }
+
+    std::sort(probs_and_inds.begin(), probs_and_inds.end(),
+              [](const auto &x, const auto &y) {
+                return std::get<0>(x) > std::get<0>(y);
+              });
+
+    std::vector<std::tuple<Scalar, size_t>> pruned_probs_and_inds;
+    pruned_probs_and_inds.reserve(probs_and_inds.size());
+
+    sum = 0.f;
+    for (size_t i = 0; i < probs_and_inds.size(); ++i) {
+      const auto &prob_and_ind = probs_and_inds[i];
+      if (std::get<0>(prob_and_ind) >= hypothesis_pruning_threshold_ and
+          i < num_hypothesis_) {
+        sum += std::get<0>(prob_and_ind);
+        pruned_probs_and_inds.push_back(prob_and_ind);
+      } else {
+        break;
+      }
+    }
+
+    for (auto &prob_and_ind : pruned_probs_and_inds) {
+      std::get<0>(prob_and_ind) /= sum;
+    }
+    return prob_and_ind;
+  }
+
+  inline size_t ComputeMaxNumHypothesis(const std::vector<Scalar> &probs) {
     size_t max_num_hypothesis = 0;
     for (const auto& prob: probs) {
       max_num_hypothesis += ComputeNumAssociation(prob);
@@ -560,5 +627,15 @@ int main(int argc, char **argv) {
   Measurements<float, 2> m{};
   f(a, m, 4, 5.f);
 
+
+  std::vector<std::tuple<float, size_t>> xs{{0.f, 3}, {-1.f, 4}, {3.f, 10}};
+
+  std::sort(xs.begin(), xs.end(), [](const auto& x, const auto& y) {
+      return std::get<0>(x) > std::get<0>(y);
+  });
+
+  for (auto x: xs) {
+    std::cout << std::get<0>(x) << " " << std::get<1>(x) << std::endl;
+  }
 
 }

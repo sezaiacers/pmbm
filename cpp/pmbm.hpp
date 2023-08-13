@@ -154,10 +154,11 @@ struct PoissonMultiBernoulliMixtureFilter {
   Scalar existence_pruning_threshold_;
   Scalar hypothesis_pruning_threshold_;
 
-  uint32_t id_;
 
   size_t num_association_ = 1;
   size_t num_hypothesis_ = 10;
+
+  uint32_t id_ = 0;
 
   auto PredictionAndUpdateOfMultiBernoulliMixture(
       const MultiBernoulliMixture<Scalar, StateSize> &multi_bernoulli_mixture,
@@ -337,10 +338,9 @@ struct PoissonMultiBernoulliMixtureFilter {
           const auto p_mean = distribution.mean + K * z_minus_z_pred;
 
           const auto p_weight = (detection_probability_ * distribution_weight) *
-                                (-0.5 * (distance + S_log_det +
+                                std::exp(-0.5 * (distance + S_log_det +
                                          static_cast<Scalar>(MeasurementSize) *
                                              1.8378770664093453f));
-
 
           weight += p_weight;
           mean += (p_weight * p_mean);
@@ -411,6 +411,11 @@ struct PoissonMultiBernoulliMixtureFilter {
       auto cost = Eigen::Matrix<double, -1, -1>(num_new_multi_bernoulli,
                                                 num_pred_upd_multi_bernoulli +
                                                     num_new_multi_bernoulli);
+      for (size_t a = 0; a < num_new_multi_bernoulli; ++a) {
+        for (size_t b = 0; b < num_pred_upd_multi_bernoulli + num_new_multi_bernoulli; ++b) {
+          cost(a, b) = std::numeric_limits<Scalar>::min();
+        }
+      }
 
       std::vector<const Bernoulli<Scalar, StateSize>*> multi_bernoulli;
       multi_bernoulli.reserve(num_pred_upd_multi_bernoulli + num_new_multi_bernoulli);
@@ -426,11 +431,14 @@ struct PoissonMultiBernoulliMixtureFilter {
 
         total_misdetection_weight += misdetection_weight;
 
-        ind += 0;
+        ind += 1;
         for (size_t k = 0; k < num_new_multi_bernoulli; ++k) {
           const auto detection_weight = pred_upd_multi_bernoulli_log_weights[ind];
-          cost(k, j) = detection_weight - misdetection_weight;
-          ind += 0;
+          if (detection_weight != std::numeric_limits<Scalar>::min()) {
+            cost(k, j) = detection_weight - misdetection_weight;
+          }
+
+          ind += 1;
         }
       }
 

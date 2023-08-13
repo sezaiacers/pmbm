@@ -550,6 +550,10 @@ struct PoissonMultiBernoulliMixtureFilter {
                   pred_upd_multi_bernoullis_log_weights, new_multi_bernoulli,
                   new_multi_bernoulli_log_weights);
 
+
+    auto probs_and_inds = SoftmaxAndSortAndPrune(associated_weights);
+
+
     return State<Scalar, StateSize>{};
   }
 
@@ -570,7 +574,7 @@ struct PoissonMultiBernoulliMixtureFilter {
     std::vector<std::tuple<Scalar, size_t>> probs_and_inds;
     probs_and_inds.reserve(weights.size());
     for (size_t i = 0; i < weights.size(); ++i) {
-      probs_and_inds.emplace_back(weights / sum, i);
+      probs_and_inds.emplace_back(weights[i] / sum, i);
     }
 
     std::sort(probs_and_inds.begin(), probs_and_inds.end(),
@@ -596,7 +600,7 @@ struct PoissonMultiBernoulliMixtureFilter {
     for (auto &prob_and_ind : pruned_probs_and_inds) {
       std::get<0>(prob_and_ind) /= sum;
     }
-    return prob_and_ind;
+    return pruned_probs_and_inds;
   }
 
   inline size_t ComputeMaxNumHypothesis(const std::vector<Scalar> &probs) {

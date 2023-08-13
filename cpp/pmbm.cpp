@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "Miller.h"
+
 template <typename Scalar> struct MeasurementModel {
   MeasurementModel(float dx, float dy) {
     H.setZero();
@@ -150,8 +152,8 @@ struct PoissonMultiBernoulliMixtureFilter {
 
   uint32_t id_;
 
-  size_t num_association_;
-  size_t num_hypothesis_;
+  size_t num_association_ = 1;
+  size_t num_hypothesis_ = 10;
 
   State<Scalar, StateSize>
   operator()(State<Scalar, StateSize> state,
@@ -354,16 +356,15 @@ struct PoissonMultiBernoulliMixtureFilter {
       new_multi_bernoulli_log_weights.emplace_back(std::log(weight));
     }
 
-
-
     // ASSOCIATE
-    std::vector<MultiBernoulli<Scalar, StateSize>> multi_bernoullis;
-    std::vector<Scalar> weights;
+    std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>> associated_multi_bernoullis;
+    std::vector<Scalar> associated_weights;
 
     const auto max_num_hypothesis =
         ComputeMaxNumHypothesis(state.multi_bernoulli_mixture.probs);
-    multi_bernoullis.reserve(max_num_hypothesis);
-    weights.reserve(max_num_hypothesis);
+
+    associated_multi_bernoullis.reserve(max_num_hypothesis);
+    associated_weights.reserve(max_num_hypothesis);
 
     for (size_t i = 0; i < state.multi_bernoulli_mixture.probs.size(); ++i) {
       const auto prob = state.multi_bernoulli_mixture.probs[i];
@@ -379,6 +380,57 @@ struct PoissonMultiBernoulliMixtureFilter {
       auto cost = Eigen::Matrix<double, -1, -1>(num_new_multi_bernoulli,
                                                 num_pred_upd_multi_bernoulli +
                                                     num_new_multi_bernoulli);
+
+      std::vector<const Bernoulli<Scalar, StateSize>*> multi_bernoulli;
+      multi_bernoulli.reserve(num_pred_upd_multi_bernoulli + num_new_multi_bernoulli);
+
+      Scalar total_misdetection_weight = 0.f;
+      auto ind = 0;
+      for (size_t j = 0; j < num_pred_upd_multi_bernoulli; ++j) {
+        const auto misdetection_weight =
+            pred_upd_multi_bernoulli_log_weights[ind];
+        const auto misdetection_bernoulli = &pred_upd_multi_bernoulli[ind];
+
+        multi_bernoulli.push_back(misdetection_bernoulli);
+
+        total_misdetection_weight += misdetection_weight;
+
+        ind += 0;
+        for (size_t k = 0; k < num_new_multi_bernoulli; ++k) {
+          const auto detection_weight = pred_upd_multi_bernoulli_log_weights[ind];
+          cost(k, j) = detection_weight - misdetection_weight;
+          ind += 0;
+        }
+      }
+
+      for (size_t j = 0; j < num_new_multi_bernoulli; ++j) {
+        multi_bernoulli.push_back(&new_multi_bernoulli[j]);
+        cost(j, j + num_pred_upd_multi_bernoulli) =
+            new_multi_bernoulli_log_weights[j];
+      }
+
+      auto associations = MurtyMiller<double>::getMBestAssignments(
+          cost, ComputeNumAssociation(prob));
+      for (const auto &association : associations) {
+        std::vector<const Bernoulli<Scalar, StateSize> *>
+            associated_multi_bernoulli = multi_bernoulli;
+        Scalar association_cost = 0.f;
+        for (const auto &edge : association) {
+          if (edge.y < num_pred_upd_multi_bernoulli) {
+            associated_multi_bernoulli[edge.y] =
+                &pred_upd_multi_bernoulli[edge.y *
+                                              (1 + num_new_multi_bernoulli) +
+                                          edge.x];
+          }
+          association_cost += static_cast<Scalar>(edge.v);
+        }
+
+        const auto associated_weight =
+            association_cost + total_misdetection_weight + std::log(prob);
+        associated_multi_bernoullis.push_back(
+            std::move(associated_multi_bernoulli));
+        associated_weights.push_back(associated_weight);
+      }
     }
 
     return State<Scalar, StateSize>{};
@@ -389,6 +441,7 @@ struct PoissonMultiBernoulliMixtureFilter {
     for (const auto& prob: probs) {
       max_num_hypothesis += ComputeNumAssociation(prob);
     }
+    return max_num_hypothesis;
   }
 
   inline size_t ComputeNumAssociation(const Scalar prob) {

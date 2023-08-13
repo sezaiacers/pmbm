@@ -1,4 +1,4 @@
-#include <eigen/dense>
+#include <Eigen/Dense>
 
 #include <chrono>
 #include <cmath>

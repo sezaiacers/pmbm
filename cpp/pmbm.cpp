@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -149,36 +150,33 @@ struct PoissonMultiBernoulliMixtureFilter {
   Scalar clutter_intensity_;
 
   Scalar gating_threshold_;
+  Scalar poisson_pruning_threshold_;
+  Scalar existence_pruning_threshold_;
 
   uint32_t id_;
 
   size_t num_association_ = 1;
   size_t num_hypothesis_ = 10;
 
-  State<Scalar, StateSize>
-  operator()(State<Scalar, StateSize> state,
-             Measurements<Scalar, MeasurementSize> measurements,
-             uint32_t current_time, float time_interval) {
+  auto PredictionAndUpdateOfMultiBernoulliMixture(
+      const MultiBernoulliMixture<Scalar, StateSize> &multi_bernoulli_mixture,
+      const Measurements<Scalar, MeasurementSize> &measurements,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &F,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &Q,
+      const Eigen::Matrix<Scalar, MeasurementSize, StateSize> &H,
+      const Eigen::Matrix<Scalar, MeasurementSize, MeasurementSize> &R,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &I,
+      float current_time) {
 
-    const auto F = transition_model_.F(time_interval);
-    const auto Q = transition_model_.Q(time_interval);
-
-    const auto& H = measurement_model_.H;
-    const auto& R = measurement_model_.R;
-
-    const auto I = Eigen::Matrix<Scalar, StateSize, StateSize>::Identity();
-
-
-    // PREDICTION AND UPDATE OF MULTI-BERNOULLI MIXTURE
     std::vector<MultiBernoulli<Scalar, StateSize>> pred_upd_multi_bernoullis;
     std::vector<std::vector<Scalar>> pred_upd_multi_bernoullis_log_weights;
 
-    pred_upd_multi_bernoullis.resize(state.multi_bernoulli_mixture.probs.size());
-    pred_upd_multi_bernoullis_log_weights.resize(state.multi_bernoulli_mixture.probs.size());
+    pred_upd_multi_bernoullis.resize(multi_bernoulli_mixture.probs.size());
+    pred_upd_multi_bernoullis_log_weights.resize(multi_bernoulli_mixture.probs.size());
 
-    for (size_t i = 0; i < state.multi_bernoulli_mixture.probs.size(); ++i) {
+    for (size_t i = 0; i < multi_bernoulli_mixture.probs.size(); ++i) {
       const auto &multi_bernoulli =
-          state.multi_bernoulli_mixture.multi_bernoullis[i];
+          multi_bernoulli_mixture.multi_bernoullis[i];
       const auto pred_upd_multi_bernoulli_size =
           multi_bernoulli.size() * (1 + measurements.size());
 
@@ -254,11 +252,19 @@ struct PoissonMultiBernoulliMixtureFilter {
         }
       }
     }
+    return std::make_tuple(pred_upd_multi_bernoullis,
+                           pred_upd_multi_bernoullis_log_weights);
+  }
 
-    // PREDICTION OF POISSON POINT PROCESS
+  auto PredictionOfPoissonPointProcess(
+      const PoissonPointProcess<Scalar, StateSize> &poisson_point_process,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &F,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &Q
+  ) {
+
     PoissonPointProcess<Scalar, StateSize> pred_poisson_point_process;
     const auto num_poisson_point_process_distributions =
-        state.poisson_point_process.weights.size() +
+        poisson_point_process.weights.size() +
         poisson_point_process_.weights.size();
 
     pred_poisson_point_process.weights.reserve(num_poisson_point_process_distributions);
@@ -272,22 +278,30 @@ struct PoissonMultiBernoulliMixtureFilter {
     }
 
     // PRED PREV POISSON POINT PROCESS DISTRIBUTIONS                                            
-    for (size_t i = 0; i < state.poisson_point_process.weights.size(); ++i) {
+    for (size_t i = 0; i < poisson_point_process.weights.size(); ++i) {
       pred_poisson_point_process.distributions.emplace_back(
-          F * state.poisson_point_process.distributions[i].mean,
-          F * state.poisson_point_process.distributions[i].covariance * F.transpose() + Q);
-      pred_poisson_point_process.weights.emplace_back(state.poisson_point_process.weights[i]);
+          F * poisson_point_process.distributions[i].mean,
+          F * poisson_point_process.distributions[i].covariance * F.transpose() + Q);
+      pred_poisson_point_process.weights.emplace_back(poisson_point_process.weights[i]);
     }
+    return pred_poisson_point_process;
+  }
 
-    // ADD NEW MULTI-BERNOULLI
+  auto AddNewMultiBernoulli(
+      const PoissonPointProcess<Scalar, StateSize> &poisson_point_process,
+      const Measurements<Scalar, MeasurementSize> &measurements,
+      const Eigen::Matrix<Scalar, MeasurementSize, StateSize> &H,
+      const Eigen::Matrix<Scalar, MeasurementSize, MeasurementSize> &R,
+      const Eigen::Matrix<Scalar, StateSize, StateSize> &I,
+      uint32_t current_time) {
 
-    MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
-    std::vector<Scalar> new_multi_bernoulli_log_weights;
+    MultiBernoulli<Scalar, StateSize> multi_bernoulli;
+    std::vector<Scalar> multi_bernoulli_log_weights;
 
-    new_multi_bernoulli.reserve(measurements.size());
-    new_multi_bernoulli_log_weights.reserve(measurements.size());
+    multi_bernoulli.reserve(measurements.size());
+    multi_bernoulli_log_weights.reserve(measurements.size());
     for (size_t i = 0; i < measurements.size(); ++i) {
-      const auto& z = measurements[i];
+      const auto &z = measurements[i];
 
       Scalar prob = 0.f;
       Scalar weight = 0.f;
@@ -298,9 +312,9 @@ struct PoissonMultiBernoulliMixtureFilter {
       covariance.setZero();
 
       bool assigned = false;
-      for (size_t j = 0; j < pred_poisson_point_process.weights.size(); ++j) {
-        const auto& distribution = pred_poisson_point_process.distributions[j];
-        const auto& distribution_weight = pred_poisson_point_process.weights[j];
+      for (size_t j = 0; j < poisson_point_process.weights.size(); ++j) {
+        const auto& distribution = poisson_point_process.distributions[j];
+        const auto& distribution_weight = poisson_point_process.weights[j];
 
         const auto S = H * distribution.covariance * H.transpose() + R;
         const auto S_inv = S.inverse();
@@ -348,29 +362,45 @@ struct PoissonMultiBernoulliMixtureFilter {
         weight = clutter_intensity_;
       }
 
-      new_multi_bernoulli.emplace_back(
+      multi_bernoulli.emplace_back(
           prob,
           MultivariateGaussian<Scalar, StateSize>{std::move(mean), std::move(covariance)},
           Track{id_++, current_time, {std::make_tuple(static_cast<int>(i), current_time)}}
       );
-      new_multi_bernoulli_log_weights.emplace_back(std::log(weight));
+      multi_bernoulli_log_weights.emplace_back(std::log(weight));
     }
 
-    // ASSOCIATE
-    std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>> associated_multi_bernoullis;
+    return std::make_tuple(multi_bernoulli, multi_bernoulli_log_weights);
+  }
+
+  auto Associate(
+      const MultiBernoulliMixture<Scalar, StateSize> &multi_bernoulli_mixture,
+
+      const std::vector<MultiBernoulli<Scalar, StateSize>>
+          &pred_upd_multi_bernoullis,
+      const std::vector<std::vector<Scalar>>
+          &pred_upd_multi_bernoullis_log_weights,
+
+      const MultiBernoulli<Scalar, StateSize> &new_multi_bernoulli,
+      const std::vector<Scalar> &new_multi_bernoulli_log_weights
+
+  ) {
+
+    std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>>
+        associated_multi_bernoullis;
     std::vector<Scalar> associated_weights;
 
     const auto max_num_hypothesis =
-        ComputeMaxNumHypothesis(state.multi_bernoulli_mixture.probs);
+        ComputeMaxNumHypothesis(multi_bernoulli_mixture.probs);
 
     associated_multi_bernoullis.reserve(max_num_hypothesis);
     associated_weights.reserve(max_num_hypothesis);
 
-    for (size_t i = 0; i < state.multi_bernoulli_mixture.probs.size(); ++i) {
-      const auto prob = state.multi_bernoulli_mixture.probs[i];
+    for (size_t i = 0; i < multi_bernoulli_mixture.probs.size(); ++i) {
+      const auto prob = multi_bernoulli_mixture.probs[i];
 
       const auto num_pred_upd_multi_bernoulli =
-          state.multi_bernoulli_mixture.multi_bernoullis[i].size();
+          multi_bernoulli_mixture.multi_bernoullis[i].size();
       const auto num_new_multi_bernoulli = new_multi_bernoulli.size();
 
       const auto &pred_upd_multi_bernoulli = pred_upd_multi_bernoullis[i];
@@ -432,6 +462,72 @@ struct PoissonMultiBernoulliMixtureFilter {
         associated_weights.push_back(associated_weight);
       }
     }
+
+
+    return std::make_tuple(associated_multi_bernoullis, associated_weights);
+  }
+
+  auto
+  UpdateAndPrunePoissonPointProcess(const PoissonPointProcess<Scalar, StateSize>
+                                        &pred_poisson_point_process) {
+
+    const auto size = pred_poisson_point_process.weights.size();
+    PoissonPointProcess<Scalar, StateSize> poisson_point_process;
+
+    poisson_point_process.weights.reserve(size);
+    poisson_point_process.distributions.reserve(size);
+
+    const auto misdetection_probability = 1.f - detection_probability_;
+    for (size_t i = 0; i < size; ++i) {
+      const auto weight =
+          pred_poisson_point_process.weights[i] * misdetection_probability;
+      if (weight >= poisson_pruning_threshold_) {
+        poisson_point_process.weights.push_back(weight);
+        poisson_point_process.distributions.push_back(
+            std::move(pred_poisson_point_process.distributions[i]));
+      }
+    }
+
+    return poisson_point_process;
+  }
+
+  State<Scalar, StateSize>
+  operator()(State<Scalar, StateSize> state,
+             const Measurements<Scalar, MeasurementSize> measurements,
+             uint32_t current_time, float time_interval) {
+
+    const auto F = transition_model_.F(time_interval);
+    const auto Q = transition_model_.Q(time_interval);
+
+    const auto& H = measurement_model_.H;
+    const auto& R = measurement_model_.R;
+
+    const auto I = Eigen::Matrix<Scalar, StateSize, StateSize>::Identity();
+
+    std::vector<MultiBernoulli<Scalar, StateSize>> pred_upd_multi_bernoullis;
+    std::vector<std::vector<Scalar>> pred_upd_multi_bernoullis_log_weights;
+    std::tie(pred_upd_multi_bernoullis, pred_upd_multi_bernoullis_log_weights) =
+        PredictionAndUpdateOfMultiBernoulliMixture(
+            state.multi_bernoulli_mixture, measurements, F, Q, H, R, I,
+            current_time);
+    auto pred_poisson_point_process =
+        PredictionOfPoissonPointProcess(state.poisson_point_process, F, Q);
+
+    MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
+    std::vector<Scalar> new_multi_bernoulli_log_weights;
+
+    std::tie(new_multi_bernoulli, new_multi_bernoulli_log_weights) =
+        AddNewMultiBernoulli(pred_poisson_point_process, measurements, H, R, I,
+                             current_time);
+
+    // ASSOCIATE
+    std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>> associated_multi_bernoullis;
+    std::vector<Scalar> associated_weights;
+
+    std::tie(associated_multi_bernoullis, associated_weights) =
+        Associate(state.multi_bernoulli_mixture, pred_upd_multi_bernoullis,
+                  pred_upd_multi_bernoullis_log_weights, new_multi_bernoulli,
+                  new_multi_bernoulli_log_weights);
 
     return State<Scalar, StateSize>{};
   }

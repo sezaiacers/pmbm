@@ -652,29 +652,3 @@ struct PoissonMultiBernoulliMixtureFilter {
                         prob * static_cast<Scalar>(num_hypothesis_))));
   }
 };
-
-int main(int argc, char **argv) {
-  TransitionModel<float> transition_model{120.f, 120.f};
-  MeasurementModel<float> measurement_model{100.f, 100.f};
-
-  PoissonMultiBernoulliMixtureFilter<float, 4, 2> f{
-    transition_model,
-    measurement_model,
-
-  };
-  State<float, 4> a{};
-  Measurements<float, 2> m{};
-  f(a, m, 4, 5.f);
-
-
-  std::vector<std::tuple<float, size_t>> xs{{0.f, 3}, {-1.f, 4}, {3.f, 10}};
-
-  std::sort(xs.begin(), xs.end(), [](const auto& x, const auto& y) {
-      return std::get<0>(x) > std::get<0>(y);
-  });
-
-  for (auto x: xs) {
-    std::cout << std::get<0>(x) << " " << std::get<1>(x) << std::endl;
-  }
-
-}

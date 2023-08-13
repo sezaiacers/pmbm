@@ -550,11 +550,46 @@ struct PoissonMultiBernoulliMixtureFilter {
                   pred_upd_multi_bernoullis_log_weights, new_multi_bernoulli,
                   new_multi_bernoulli_log_weights);
 
+    auto multi_bernoulli_mixture = CreateMultiBernoulliMixture(
+        associated_multi_bernoullis, associated_weights);
+
+    return State<Scalar, StateSize>{std::move(multi_bernoulli_mixture),
+                                    std::move(poisson_point_process)};
+  }
+
+  auto CreateMultiBernoulliMixture(
+      const std::vector<std::vector<const Bernoulli<Scalar, StateSize> *>>
+          &associated_multi_bernoullis,
+      const std::vector<Scalar> &associated_weights) {
+
+    MultiBernoulliMixture<Scalar, StateSize> multi_bernoulli_mixture;
 
     auto probs_and_inds = SoftmaxAndSortAndPrune(associated_weights);
+    const auto size = probs_and_inds.size();
 
+    multi_bernoulli_mixture.probs.reserve(size);
+    multi_bernoulli_mixture.multi_bernoullis.reserve(size);
+    for (size_t i = 0; i < size; ++i) {
+      const auto prob = std::get<0>(probs_and_inds[i]);
+      const auto ind = std::get<1>(probs_and_inds[i]);
 
-    return State<Scalar, StateSize>{};
+      const auto &associated_multi_bernoulli = associated_multi_bernoullis[ind];
+
+      MultiBernoulli<Scalar, StateSize> multi_bernoulli;
+      multi_bernoulli.reserve(associated_multi_bernoulli.size());
+
+      for (const auto &bernoulli : associated_multi_bernoulli) {
+        if (bernoulli->prob >= existence_pruning_threshold_) {
+          multi_bernoulli.push_back(*bernoulli);
+        }
+      }
+
+      multi_bernoulli_mixture.probs.push_back(prob);
+      multi_bernoulli_mixture.multi_bernoullis.push_back(
+          std::move(multi_bernoulli));
+    }
+
+    return multi_bernoulli_mixture;
   }
 
   inline std::vector<std::tuple<Scalar, size_t>>

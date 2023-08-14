@@ -413,7 +413,7 @@ struct PoissonMultiBernoulliMixtureFilter {
                                                     num_new_multi_bernoulli);
       for (size_t a = 0; a < num_new_multi_bernoulli; ++a) {
         for (size_t b = 0; b < num_pred_upd_multi_bernoulli + num_new_multi_bernoulli; ++b) {
-          cost(a, b) = std::numeric_limits<Scalar>::min();
+          cost(a, b) = std::numeric_limits<float>::lowest();
         }
       }
 
@@ -437,7 +437,6 @@ struct PoissonMultiBernoulliMixtureFilter {
           if (detection_weight != std::numeric_limits<Scalar>::min()) {
             cost(k, j) = detection_weight - misdetection_weight;
           }
-
           ind += 1;
         }
       }
@@ -447,6 +446,7 @@ struct PoissonMultiBernoulliMixtureFilter {
         cost(j, j + num_pred_upd_multi_bernoulli) =
             new_multi_bernoulli_log_weights[j];
       }
+
 
       auto associations = MurtyMiller<double>::getMBestAssignments(
           cost, ComputeNumAssociation(prob));
@@ -459,7 +459,7 @@ struct PoissonMultiBernoulliMixtureFilter {
             associated_multi_bernoulli[edge.y] =
                 &pred_upd_multi_bernoulli[edge.y *
                                               (1 + num_new_multi_bernoulli) +
-                                          edge.x];
+                                          edge.x + 1];
           }
           association_cost += static_cast<Scalar>(edge.v);
         }
@@ -471,7 +471,6 @@ struct PoissonMultiBernoulliMixtureFilter {
         associated_weights.push_back(associated_weight);
       }
     }
-
 
     return std::make_tuple(associated_multi_bernoullis, associated_weights);
   }
@@ -602,7 +601,7 @@ struct PoissonMultiBernoulliMixtureFilter {
 
   inline std::vector<std::tuple<Scalar, size_t>>
   SoftmaxAndSortAndPrune(std::vector<Scalar> weights) {
-    Scalar max = std::numeric_limits<Scalar>::min();
+    Scalar max = std::numeric_limits<Scalar>::lowest();
 
     for (const auto &weight : weights) {
       max = std::max(max, weight);
@@ -610,7 +609,7 @@ struct PoissonMultiBernoulliMixtureFilter {
 
     Scalar sum = 0.f;
     for (auto &weight : weights) {
-      weight = std::exp(weight);
+      weight = std::exp(weight - max);
       sum += weight;
     }
 

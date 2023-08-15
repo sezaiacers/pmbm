@@ -48,7 +48,7 @@ PYBIND11_MODULE(pmbm, m) {
     .def_readonly("multi_bernoullis", &MultiBernoulliMixture<float, 4>::multi_bernoullis);
 
   pybind11::class_<PoissonPointProcess<float, 4>>(m, "PoissonPointProcess")
-    .def(pybind11::init<>())
+    .def(pybind11::init<std::vector<float>, std::vector<MultivariateGaussian<float, 4>>>())
     .def_readonly("weights", &PoissonPointProcess<float, 4>::weights)
     .def_readonly("distributions", &PoissonPointProcess<float, 4>::distributions);
 

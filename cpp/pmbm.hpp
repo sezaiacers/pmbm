@@ -76,10 +76,10 @@ template <typename Scalar> struct TransitionModel {
 
 struct Track {
   uint32_t id;
-  uint32_t start_time;
-  std::vector<std::tuple<int, uint32_t>> zs;
+  uint64_t start_time;
+  std::vector<std::tuple<int, uint64_t>> zs;
 
-  Track Append(int index, uint32_t time) const {
+  Track Append(int index, uint64_t time) const {
     auto track = *this;
     track.zs.emplace_back(index, time);
     return track;
@@ -154,7 +154,6 @@ struct PoissonMultiBernoulliMixtureFilter {
   Scalar existence_pruning_threshold_;
   Scalar hypothesis_pruning_threshold_;
 
-
   size_t num_association_ = 1;
   size_t num_hypothesis_ = 10;
 
@@ -168,7 +167,7 @@ struct PoissonMultiBernoulliMixtureFilter {
       const Eigen::Matrix<Scalar, MeasurementSize, StateSize> &H,
       const Eigen::Matrix<Scalar, MeasurementSize, MeasurementSize> &R,
       const Eigen::Matrix<Scalar, StateSize, StateSize> &I,
-      float current_time) {
+      uint64_t current_time) {
 
     std::vector<MultiBernoulli<Scalar, StateSize>> pred_upd_multi_bernoullis;
     std::vector<std::vector<Scalar>> pred_upd_multi_bernoullis_log_weights;
@@ -295,7 +294,7 @@ struct PoissonMultiBernoulliMixtureFilter {
       const Eigen::Matrix<Scalar, MeasurementSize, StateSize> &H,
       const Eigen::Matrix<Scalar, MeasurementSize, MeasurementSize> &R,
       const Eigen::Matrix<Scalar, StateSize, StateSize> &I,
-      uint32_t current_time) {
+      uint64_t current_time) {
 
     MultiBernoulli<Scalar, StateSize> multi_bernoulli;
     std::vector<Scalar> multi_bernoulli_log_weights;
@@ -502,7 +501,7 @@ struct PoissonMultiBernoulliMixtureFilter {
   State<Scalar, StateSize>
   operator()(State<Scalar, StateSize> state,
              const Measurements<Scalar, MeasurementSize> measurements,
-             uint32_t current_time, float time_interval) {
+             uint64_t current_time, float time_interval) {
 
     const auto F = transition_model_.F(time_interval);
     const auto Q = transition_model_.Q(time_interval);
@@ -516,6 +515,8 @@ struct PoissonMultiBernoulliMixtureFilter {
         PredictionOfPoissonPointProcess(state.poisson_point_process, F, Q);
     auto poisson_point_process =
         UpdateAndPrunePoissonPointProcess(pred_poisson_point_process);
+
+    if (measurements.size() == 0) return state;
 
     MultiBernoulli<Scalar, StateSize> new_multi_bernoulli;
     std::vector<Scalar> new_multi_bernoulli_log_weights;

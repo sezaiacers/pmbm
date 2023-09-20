@@ -195,7 +195,7 @@ struct PoissonMultiBernoulliMixtureFilter {
         const auto pred_prob = bernoulli.prob * survival_probability_;
         const auto pred_mean = F * bernoulli.distribution.mean;
         const auto pred_covariance =
-            F * bernoulli.distribution.covariance * F.transpose() + Q;
+            F * bernoulli.distribution.covariance * F.transpose() + Q + R;
 
         // MISDETECTION BERNOULLI
         {
